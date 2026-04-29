@@ -1,0 +1,417 @@
+---
+title: "STAT380 Final Project"
+author: "Adam Abdel-Latif & Yuerong Shu"
+date: "2026-04-27"
+output: html_document
+---
+
+## Task1
+
+#Relevant Info
+Prior to each online match, players inthe game lobby are presented with two options for the battlefield of the upcoming game (`Map1` and`Map2`). The players have the option to vote, and the resulting vote is recorded in the `MapVote` column.
+The winning map is listed in the `Choice` column. In the event of a tie vote, the map listed in `Map1` is chosen. (Games for which the player entered the lobby after the vote has taken place have no information in `Map1` and `Map2` but have the winning map presented in `Choice`.)
+Research Question: Which maps are the most likely to win the map vote when they are an option?
+
+Strategy: Find the rate for which each map is selected, both in total and when it is in the map pool. Ignore maps that are the "choice" when a player has entered the lobby after the vote has taken place. Find if there are any significant tie correlations between maps.
+
+
+## Task2
+
+### Conversation with AI, prompts and results
+Used generative AI: ChatGPT
+Prompt1: I have uploaded 4 csv and here is the background of those datasets, get yourself familiar with those and we are going to do some data cleaning and EDA latter: [pasted the background introduction of all 4 datasets and attached csv files]
+*ChatGPT replied nothing
+
+Prompt2: Here is the instruction: [pasted the requirements of task1] Now help me write a complete solution of this question in R with annotation to major steps. You can solve things step by step and ask me what to do now while providing me options.
+*ChatGPT replied:
+
+Below is a complete R solution you can use.
+
+Discussion / plan paragraph
+
+To answer the research question, I will first combine the Player 1 and Player 2 datasets into one dataset because both contain the same type of match-level information. Since the research question focuses on map voting, I will use the variables Map1, Map2, Choice, and MapVote. Some rows have missing Map1 and Map2 because the player entered the lobby after voting was completed; those rows cannot be used to determine which maps were candidates, so they should be excluded from the vote-candidate analysis. I will also clean map names by trimming extra blanks and correcting misspellings using the official map names from CODMaps.csv as the reference.
+
+For each match with two map options, I will count each listed map as one candidate appearance. A map will be counted as a winner when it matches the Choice column. I will also separate wins into two types: a direct vote win, where the map received more votes than the other option, and a tie-default win, where the vote was tied and the map won because it was listed as Map1. Finally, I will calculate the win proportion as number of wins / number of times candidate, then create a table and bar chart to show which maps were most likely to win when they appeared as an option.
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(forcats)
+
+# Read in datasets
+p1 <- read.csv("C:/Users/alice/Downloads/CODGames_p1_380.csv", stringsAsFactors = FALSE)
+p2 <- read.csv("C:/Users/alice/Downloads/CODGames_p2_380.csv", stringsAsFactors = FALSE)
+maps <- read.csv("C:/Users/alice/Downloads/CODMaps.csv", stringsAsFactors = FALSE)
+
+# Combine player datasets
+cod_games <- bind_rows(
+  p1 %>% mutate(Player = "Player 1"),
+  p2 %>% mutate(Player = "Player 2")
+)
+
+# Check official map names
+maps$Name
+```
+
+```{r}
+# Clean common map-name problems without editing the csv files
+clean_map_name <- function(x) {
+  x <- str_trim(x)
+
+  x <- case_when(
+    x %in% c("Collateral", "Collateral Striek", 
+             "Collaterol Strike", "Collaterel Strike") ~ "Collateral Strike",
+    x == "Deprogam" ~ "Deprogram",
+    x == "Drive-in" ~ "Drive-In",
+    x %in% c("Miami Stirke", "Miami Sstrike") ~ "Miami Strike",
+    x == "Riad" ~ "Raid",
+    x == "Ruah" ~ "Rush",
+    x == "Amrada Strike" ~ "Armada Strike",
+    x %in% c("APocalypse", "Apocolypse") ~ "Apocalypse",
+    x == "Deisel" ~ "Diesel",
+    x == "yamantau" ~ "Yamantau",
+    x == "Nuketown '84 Halloween" ~ "Nuketown '84",
+    TRUE ~ x
+  )
+
+  x
+}
+
+cod_games_clean <- cod_games %>%
+  mutate(
+    Map1 = clean_map_name(Map1),
+    Map2 = clean_map_name(Map2),
+    Choice = clean_map_name(Choice),
+    MapVote = str_trim(MapVote),
+    MapVote = str_replace(MapVote, " o ", " to ")
+  )
+```
+
+```{r}
+# Parse MapVote into votes for Map1 and Map2
+cod_votes <- cod_games_clean %>%
+  filter(!is.na(Map1), !is.na(Map2)) %>%
+  separate(
+    MapVote,
+    into = c("Map1Votes", "Map2Votes"),
+    sep = " to ",
+    convert = TRUE
+  )
+```
+
+```{r}
+# Create one row per candidate map
+map_candidates <- cod_votes %>%
+  mutate(GameID = row_number()) %>%
+  pivot_longer(
+    cols = c(Map1, Map2),
+    names_to = "MapPosition",
+    values_to = "MapName"
+  ) %>%
+  mutate(
+    Candidate = 1,
+    Won = ifelse(MapName == Choice, 1, 0),
+
+    CandidateVotes = ifelse(MapPosition == "Map1", Map1Votes, Map2Votes),
+    OpponentVotes = ifelse(MapPosition == "Map1", Map2Votes, Map1Votes),
+
+    VoteWin = ifelse(Won == 1 & CandidateVotes > OpponentVotes, 1, 0),
+    TieDefaultWin = ifelse(Won == 1 & MapPosition == "Map1" &
+                             CandidateVotes == OpponentVotes, 1, 0)
+  )
+```
+
+```{r}
+# Summarize by map
+map_vote_summary <- map_candidates %>%
+  group_by(MapName) %>%
+  summarise(
+    Times_Candidate = n(),
+    Total_Wins = sum(Won),
+    Vote_Wins = sum(VoteWin),
+    Tie_Default_Wins = sum(TieDefaultWin),
+    Win_Proportion = round(Total_Wins / Times_Candidate, 3),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(Win_Proportion))
+
+map_vote_summary
+```
+
+```{r}
+# Visualization
+ggplot(map_vote_summary,
+       aes(x = fct_reorder(MapName, Win_Proportion),
+           y = Win_Proportion)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(
+    title = "Probability of Winning Map Vote When Listed as a Candidate",
+    x = "Map",
+    y = "Win Proportion"
+  ) +
+  theme_minimal()
+```
+Answer to the research question
+
+Based on the cleaned and combined data, the maps most likely to win the map vote when they were listed as an option were the maps with the highest Win_Proportion. In my calculation, the strongest maps were Nuketown ’84, Crossroads Strike, Raid, Diesel, and Standoff. These maps won a large proportion of the times they appeared as candidates. The table also separates wins earned by receiving more votes from wins caused by a tie where the map was chosen because it was listed as Map1, which is important because tie-default wins do not necessarily show stronger player preference.
+
+Prompt3: I noticed that when I run the chunk # Parse MapVote into votes for Map1 and Map2, R send me this warning: Warning :Expected 2 pieces. Missing pieces filled with `NA` in 165 rows [3, 7, 9, 16, 18, 22, 23, 26, 42, 50, 56, 59, 61, 67, 71, 79, 85,
+86, 99, 109, ...]. How would you deal with NA? Does this reveal some potential problem in your data cleansing process? 
+
+*ChatGPT answered:
+Good catch — this warning is important, and yes, it tells you something about your data cleaning.
+
+What the warning means?
+Expected 2 pieces. Missing pieces filled with NA
+This happens because separate(..., sep = " to ") expected something like:
+"3 to 5"
+But in some rows, MapVote is:
+
+missing (NA)
+not in "X to Y" format
+something like "Skipped", "—", "No vote", etc.
+or badly formatted (extra spaces, typos)
+
+So R cannot split into two numbers → produces NA.
+
+Does this reveal a problem?
+YES — but not necessarily a mistake
+
+It reveals:
+
+1. Data quality issues in MapVote
+
+Some rows do not contain valid vote information
+
+2. These rows should NOT be used for vote comparison
+
+Because you cannot determine:
+
+which map got more votes
+whether it was a tie
+Correct way to handle it (what your professor expects)
+
+You should:
+
+Step 1: Inspect problematic rows
+```{r}
+cod_games_clean %>%
+  filter(!str_detect(MapVote, "to"))
+```
+This shows rows causing the issue.
+
+Step 2: Keep only valid vote rows for vote-based analysis
+
+Modify your code:
+```{r}
+cod_votes <- cod_games_clean %>%
+  filter(!is.na(Map1), !is.na(Map2)) %>%
+  filter(str_detect(MapVote, "to")) %>%   # <-- IMPORTANT FIX
+  separate(
+    MapVote,
+    into = c("Map1Votes", "Map2Votes"),
+    sep = " to ",
+    convert = TRUE
+  )
+```
+
+Step 3: (Optional) keep track of excluded rows
+```{r}
+invalid_votes <- cod_games_clean %>%
+  filter(!str_detect(MapVote, "to"))
+
+nrow(invalid_votes)
+```
+
+Why this is correct statistically
+
+Your research question requires:
+
+map wins when it receives more votes
+
+If you don't have vote counts, you cannot determine a vote-based win, so those rows must be excluded.
+
+Very important nuance (for your write-up)
+
+There are two types of missing cases:
+
+Case A: Player joined after voting
+Map1, Map2 missing → already filtered
+Case B: Vote format missing/invalid
+MapVote not usable → must also filter
+What to write in your report (VERY important for points)
+
+Some observations contained missing or improperly formatted vote information in the MapVote variable, which prevented extraction of vote counts. These rows were excluded from the vote-based analysis, as it was not possible to determine which map received more votes.
+
+Bonus: More robust parsing (optional)
+
+If you want to be extra safe:
+```{r}
+cod_votes <- cod_games_clean %>%
+  filter(!is.na(Map1), !is.na(Map2)) %>%
+  filter(str_detect(MapVote, "^[0-9]+ to [0-9]+$")) %>%
+  separate(
+    MapVote,
+    into = c("Map1Votes", "Map2Votes"),
+    sep = " to ",
+    convert = TRUE
+  )
+```
+
+How to deal with NA?
+Filter out rows where MapVote cannot be parsed
+Does it reveal a problem?
+Yes: inconsistent vote formatting / missing vote data
+No: your cleaning is mostly correct — this is real-world messy data
+My recommendation
+
+Add the filter and mention it in your report → this is exactly the kind of reasoning instructors want to see.
+
+If you want, next step we can:
+👉 check how many rows you are losing and whether it biases results
+
+Prompt4: Please do so and could you teach me how to keep a chunk with code in file without allowing it running when kniting document?
+
+*ChatGPT replied: 
+Part 1: Check how many rows are excluded and whether it may bias results
+
+Use this chunk:
+```{r}
+# Total rows in combined dataset
+n_total <- nrow(cod_games_clean)
+
+# Rows with both candidate maps present
+n_candidates <- cod_games_clean %>%
+  filter(!is.na(Map1), !is.na(Map2)) %>%
+  nrow()
+
+# Rows with valid MapVote format
+n_valid_vote <- cod_games_clean %>%
+  filter(!is.na(Map1), !is.na(Map2)) %>%
+  filter(str_detect(MapVote, "^[0-9]+ to [0-9]+$")) %>%
+  nrow()
+
+# Rows excluded because of invalid vote info
+n_excluded <- n_candidates - n_valid_vote
+
+# Percent excluded
+pct_excluded <- round(100 * n_excluded / n_candidates, 2)
+
+n_total
+n_candidates
+n_valid_vote
+n_excluded
+pct_excluded
+```
+
+Check if excluded rows are concentrated on certain maps
+```{r}
+excluded_rows <- cod_games_clean %>%
+  filter(!is.na(Map1), !is.na(Map2)) %>%
+  filter(!str_detect(MapVote, "^[0-9]+ to [0-9]+$"))
+
+table(excluded_rows$Choice)
+```
+If one map appears unusually often among excluded rows, mention possible bias.
+
+Then it taught me way to prevent code running.
+
+Prompt5: here are the result for some of the previous chunks: Are there anything we can improve? are we on the right track? [result of chunks pasted to analyze]
+
+*ChatGPT replied:
+```{r}
+invalid_votes %>%
+  count(MapVote, sort = TRUE)
+```
+
+This tells you whether they are:
+
+blank
+NA
+weird formats like "Skipped"
+"2to3"
+"3 - 2"
+
+This may allow recovery of some rows.
+
+Improvement 2: Fix additional formatting before excluding
+
+Sometimes rows fail because spacing inconsistent.
+
+Use:
+```{r}
+cod_games_clean <- cod_games_clean %>%
+  mutate(
+    MapVote = str_trim(MapVote),
+    MapVote = str_replace_all(MapVote, "\\s+", " "),
+    MapVote = str_replace_all(MapVote, "-", " to "),
+    MapVote = str_replace_all(MapVote, "to", " to ")
+  )
+```
+
+Then rerun parsing.
+
+This may reduce 165 exclusions.
+
+Improvement 3: Check if exclusions bias certain maps
+
+Your output shows:
+
+Standoff = 14 excluded
+Diesel = 10
+Crossroads Strike = 9
+Hijacked = 9
+Armada Strike = 9
+
+That suggests exclusions are not perfectly even.
+
+Meaning some maps may be slightly undercounted.
+
+This should be mentioned.
+
+Write this in report
+
+Approximately 19.7% of matches with candidate maps had unusable vote-count formatting and were excluded. Excluded matches were spread across many maps, although some maps such as Standoff and Diesel appeared more frequently. Therefore, final win probabilities should be interpreted with minor caution.
+
+That sounds professional.
+
+Improvement 4: VERY important — separate two research questions
+
+Your assignment asks:
+
+Which maps most likely to win when an option?
+
+This can be answered TWO ways:
+
+Method A (Best)
+
+Use Choice
+
+includes all 839 rows
+directly tells winner
+Method B
+
+Use vote counts
+
+only 674 rows
+allows tie/default distinction
+Best strategy:
+
+Use 839 rows for candidate/winner proportions, then use 674 rows to study tie wins.
+
+This is much stronger than using only 674.
+
+### Discussion of prompt
+
+
+### Comparison with result in task1
+
+## Task3
+
+
+
+## Task4
+
