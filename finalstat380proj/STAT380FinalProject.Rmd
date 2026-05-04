@@ -8,7 +8,7 @@ output: html_document
 ## Task1
 
 #Relevant Info
-Prior to each online match, players inthe game lobby are presented with two options for the battlefield of the upcoming game (`Map1` and`Map2`). The players have the option to vote, and the resulting vote is recorded in the `MapVote` column.
+Prior to each online match, players in the game lobby are presented with two options for the battlefield of the upcoming game (`Map1` and`Map2`). The players have the option to vote, and the resulting vote is recorded in the `MapVote` column.
 The winning map is listed in the `Choice` column. In the event of a tie vote, the map listed in `Map1` is chosen. (Games for which the player entered the lobby after the vote has taken place have no information in `Map1` and `Map2` but have the winning map presented in `Choice`.)
 Research Question: Which maps are the most likely to win the map vote when they are an option?
 
@@ -505,6 +505,19 @@ This is much stronger than using only 674.
 ### Comparison with result in task1
 
 ## Task3
+
+#Relevant Information
+There are a variety of game types (GameType variable) within this dataset. The difference between the game types is that players have different objectives for the game. For instance, in the game type “Hardpoint”, teams earn points by capturing and defending a location. In “TDM” teams earn points by eliminating enemy opponents. As these game types have different objectives and may last for different amounts of time, the game type might affect the TotalXP earned.
+
+#Research Question: How does the game type affect TotalXP after accounting for the Score?
+
+#Strategy
+This is a covariance question seeking if the game type affects totalXP after accounting for score. First we need to strip the data from the Hardcore prefix and standardize the game types, then conduct analysis to see if game type has a statistically significant affect on a players score after controlling for a players score.
+
+```{r}
+cod <- cod %>%
+  mutate(GameType = str_trim(str_remove(GameType, "^HC\\s*-\\s*")))
+```
 
 
 
