@@ -136,9 +136,9 @@ library(ggplot2)
 library(forcats)
 
 # Read in datasets
-p1 <- read.csv("C:/Users/alice/Downloads/CODGames_p1_380.csv", stringsAsFactors = FALSE)
-p2 <- read.csv("C:/Users/alice/Downloads/CODGames_p2_380.csv", stringsAsFactors = FALSE)
-maps <- read.csv("C:/Users/alice/Downloads/CODMaps.csv", stringsAsFactors = FALSE)
+p1 <- read.csv("CODGames_p1_380.csv", stringsAsFactors = FALSE)
+p2 <- read.csv("CODGames_p2_380.csv", stringsAsFactors = FALSE)
+maps <- read.csv("CODMaps.csv", stringsAsFactors = FALSE)
 
 # Combine player datasets
 cod_games <- bind_rows(
@@ -504,22 +504,160 @@ This is much stronger than using only 674.
 
 ### Comparison with result in task1
 
-## Task3
+## Task 3 — Inference
 
-#Relevant Information
-There are a variety of game types (GameType variable) within this dataset. The difference between the game types is that players have different objectives for the game. For instance, in the game type “Hardpoint”, teams earn points by capturing and defending a location. In “TDM” teams earn points by eliminating enemy opponents. As these game types have different objectives and may last for different amounts of time, the game type might affect the TotalXP earned.
+### Relevant Information
 
-#Research Question: How does the game type affect TotalXP after accounting for the Score?
+The dataset contains several different game types in the `GameType` variable. Each game type has its own objectives — for example, in **Hardpoint** teams earn points by holding down a rotating location, while in **TDM** (Team Deathmatch) points come from eliminating enemies. Since the modes play out differently and can run for different lengths, it makes sense that game type would have some effect on how much total XP a player walks away with.
 
-#Strategy
-This is a covariance question seeking if the game type affects totalXP after accounting for score. First we need to strip the data from the Hardcore prefix and standardize the game types, then conduct analysis to see if game type has a statistically significant affect on a players score after controlling for a players score.
+**Research Question:** How does the game type affect TotalXP after accounting for the player's Score?
 
-```{r}
+---
+
+### Data Cleaning
+
+One issue with the `GameType` column is that it has both normal and Hardcore (HC) versions of each mode listed separately (e.g., `”HC - TDM”` and `”TDM”`). Since there's no distinction between them for our purposes, we strip the `”HC - “` prefix to merge them together. We also drop any rows with missing values in `TotalXP`, `Score`, or `GameType` before moving forward.
+
+```{r message=FALSE, warning=FALSE}
+library(stringr)
+
 cod <- cod %>%
   mutate(GameType = str_trim(str_remove(GameType, "^HC\\s*-\\s*")))
+
+cod_task3 <- cod %>%
+  filter(!is.na(TotalXP), !is.na(Score), GameType != "")
 ```
 
+After cleaning, the unique game types present in the data are:
 
+```{r}
+unique(cod_task3$GameType)
+```
+
+---
+
+### Exploratory Data Analysis
+
+Before jumping into modeling, it helps to look at how `TotalXP` and `Score` are distributed across game types. This gives us a sense of what we're working with and whether the data actually supports the idea that game type matters.
+
+#### Summary Statistics
+
+The table below shows basic summary statistics for `TotalXP` and `Score` broken down by game type. It's a good starting point for seeing whether the modes actually differ from each other.
+
+```{r message=FALSE}
+task3_stats <- cod_task3 %>%
+  group_by(GameType) %>%
+  summarise(
+    n            = n(),
+    Mean_XP      = round(mean(TotalXP), 0),
+    Median_XP    = round(median(TotalXP), 0),
+    SD_XP        = round(sd(TotalXP), 0),
+    Mean_Score   = round(mean(Score), 0),
+    Median_Score = round(median(Score), 0),
+    SD_Score     = round(sd(Score), 0)
+  ) %>%
+  arrange(desc(Mean_XP))
+
+task3_stats
+```
+
+Right away the table shows that Hardpoint and Domination both have higher average XP compared to TDM and Kill Confirmed, which makes sense since those modes tend to involve more sustained team activity and likely run longer. Interestingly, Score also varies by game type — Domination scores cluster very tightly compared to the other modes. This matters because if we just compare raw XP across modes without accounting for Score, we'd be mixing up the effect of game type with the effect of how well the player performed. That's why controlling for Score in the model is important.
+
+---
+
+#### Distribution of TotalXP by Game Type
+
+```{r fig.align='center', fig.width=7, fig.height=4}
+ggplot(cod_task3, aes(x = reorder(GameType, TotalXP, median), y = TotalXP)) +
+  geom_boxplot(fill = "steelblue", color = "gray30", outlier.alpha = 0.3) +
+  coord_flip() +
+  labs(
+    title = "Distribution of Total XP by Game Type",
+    x     = "Game Type",
+    y     = "Total XP"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+The boxplots make the differences pretty clear. Domination and Hardpoint have noticeably higher median XP, while Kill Confirmed is at the bottom. There's also a lot of spread within each mode though, which suggests that game type alone doesn't explain everything — how well you played (your Score) clearly plays a role too. This is another reason why we need to account for Score in the model.
+
+---
+
+#### Distribution of Score by Game Type
+
+```{r fig.align='center', fig.width=7, fig.height=4}
+ggplot(cod_task3, aes(x = reorder(GameType, Score, median), y = Score)) +
+  geom_boxplot(fill = "coral", color = "gray30", outlier.alpha = 0.3) +
+  coord_flip() +
+  labs(
+    title = "Distribution of Score by Game Type",
+    x     = "Game Type",
+    y     = "Score"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+This confirms what the summary table hinted at — Score is not spread evenly across game types. Domination in particular has a very narrow score range compared to Hardpoint or TDM. So if we're trying to measure how much game type affects XP, we can't ignore Score, since different modes naturally produce different score distributions in the first place.
+
+---
+
+#### TotalXP vs. Score by Game Type
+
+```{r fig.align='center', fig.width=8, fig.height=5, message=FALSE, warning=FALSE}
+ggplot(cod_task3, aes(x = Score, y = TotalXP, color = GameType)) +
+  geom_point(alpha = 0.2, size = 1.2) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = 0.9) +
+  labs(
+    title  = "Total XP vs. Score by Game Type",
+    x      = "Score",
+    y      = "Total XP",
+    color  = "Game Type"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "right")
+```
+
+This is probably the most useful plot in the EDA. There's a clear positive relationship between Score and TotalXP in every game type, which makes sense — better performance means more XP. What's interesting though is that the slopes look quite different across modes. Hardpoint has a much steeper trend line than TDM or Kill Confirmed, meaning each extra point of Score earns you more XP in Hardpoint than it would in other modes. This suggests there might be an interaction between Score and GameType, which we'll keep in mind. For now we'll fit the simpler additive model since it's more interpretable and easier to work with given our class material.
+
+---
+
+### Model: Multiple Linear Regression
+
+To answer the research question, we fit a multiple linear regression model with `TotalXP` as the response, `Score` as a continuous predictor, and `GameType` as a categorical predictor. Including both in the same model lets us estimate the effect of game type on XP while holding Score constant — which is exactly what the research question is asking for.
+
+```{r}
+model_task3 <- lm(TotalXP ~ Score + GameType, data = cod_task3)
+summary(model_task3)
+```
+
+The `anova()` output runs a partial F-test for `GameType` — basically asking whether adding game type to the model actually helps explain TotalXP beyond what Score already explains.
+
+```{r}
+anova(model_task3)
+```
+
+---
+
+### Model Assumptions
+
+Before interpreting the results, we should check whether the model assumptions hold. The two main ones to look at are constant variance (residuals vs. fitted) and normality of residuals (QQ-plot).
+
+```{r fig.align='center', fig.width=9, fig.height=4}
+par(mfrow = c(1, 2))
+
+plot(model_task3, which = 1, main = "Residuals vs Fitted")
+plot(model_task3, which = 2, main = "Normal Q-Q")
+
+par(mfrow = c(1, 1))
+```
+
+The residuals vs. fitted plot has a bit of a fan shape — the spread gets wider as fitted values increase. This suggests some heteroscedasticity, meaning the variance isn't perfectly constant across the range of predictions. It's not surprising given that high-XP games tend to be more unpredictable in general. This doesn't break the model, but it does mean we should be a little cautious about taking p-values too literally. The QQ-plot looks pretty good through the middle of the data but drifts a bit at the upper tail, which is consistent with a handful of unusually high-XP games pulling the distribution. With the sample size we have, inference should still hold reasonably well.
+
+---
+
+### Answer to the Research Question
+
+Based on the model output, game type does have a statistically significant effect on TotalXP even after accounting for Score — the partial F-test p-value is well below 0.05. The Score coefficient tells us that higher in-game performance is associated with more XP regardless of what mode you're playing. The GameType coefficients then show how much more or less XP you'd expect in each mode relative to the reference category, holding Score constant. Modes like Hardpoint are associated with notably higher XP, which lines up with what we saw in the EDA — those modes involve capturing and holding positions which probably generate a lot of bonus XP on top of the base score. To directly answer the research question: yes, game type affects TotalXP even after accounting for Score, with objective-based modes generally rewarding players with more total XP than elimination-based ones like TDM.
 
 ## Task4
 
