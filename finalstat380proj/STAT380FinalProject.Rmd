@@ -12,7 +12,7 @@ Prior to each online match, players inthe game lobby are presented with two opti
 The winning map is listed in the `Choice` column. In the event of a tie vote, the map listed in `Map1` is chosen. (Games for which the player entered the lobby after the vote has taken place have no information in `Map1` and `Map2` but have the winning map presented in `Choice`.)
 Research Question: Which maps are the most likely to win the map vote when they are an option?
 
-Strategy: Find the rate for which each map is selected, both in total and when it is in the map pool. Ignore maps that are the "choice" when a player has entered the lobby after the vote has taken place. Find if there are any significant tie correlations between maps.
+Strategy: Find the rate for which each map is selected, both in total and when it is in the map pool. Ignore maps that are the "choice" when a player has entered the lobby after the vote has taken place. Find if there are any significant tie correlations between maps. 
 
 ```{r}
 library(dplyr)
