@@ -5,16 +5,22 @@ date: "2026-04-27"
 output: html_document
 ---
 
-## Task1
+## Task 1
 
-#Relevant Info
+### Relevant Information
+
 Prior to each online match, players in the game lobby are presented with two options for the battlefield of the upcoming game (`Map1` and`Map2`). The players have the option to vote, and the resulting vote is recorded in the `MapVote` column.
 The winning map is listed in the `Choice` column. In the event of a tie vote, the map listed in `Map1` is chosen. (Games for which the player entered the lobby after the vote has taken place have no information in `Map1` and `Map2` but have the winning map presented in `Choice`.)
-Research Question: Which maps are the most likely to win the map vote when they are an option?
 
-Strategy: Find the rate for which each map is selected, both in total and when it is in the map pool. Ignore maps that are the "choice" when a player has entered the lobby after the vote has taken place. Find if there are any significant tie correlations between maps. 
+**Research Question:** Which maps are the most likely to win the map vote when they are an option?
 
-```{r}
+### Approach
+
+To answer this, we need to calculate a win rate for each map, specifically how often a map wins when it was actually listed as a candidate. We first filter out any games where the player joined late (since those rows don't tell us which maps were on the ballot). From there we count how many times each map appeared as an option and how many times it ended up being chosen. We also separate out wins that came from actually getting more votes versus wins that only happened because the map was in the `Map1` position during a tie. Finally, we look at which maps tend to benefit most from ties to see if there's any interesting pattern there.
+
+We load the two player datasets and combine them into one before doing any analysis.
+
+```{r message=FALSE, warning=FALSE}
 library(dplyr)
 library(tidyr)
 library(ggplot2)
@@ -25,25 +31,18 @@ p2 <- read.csv("CODGames_p2_380.csv", stringsAsFactors = FALSE)
 cod <- bind_rows(p1, p2)
 ```
 
+Games where the player joined after voting are filtered out, since those rows don't include `Map1` or `Map2`.
+
 ```{r}
-# remove games where player joined after the vote (Map1 and Map2 are blank)
 voted_games <- cod %>%
   filter(Map1 != "" & Map2 != "")
 ```
 
-```{r}
-# overall rate: how often each map was chosen out of all games
-total_games <- nrow(cod)
+### Win Rate Calculation
 
-overall_rate <- cod %>%
-  count(Choice, name = "total_wins") %>%
-  mutate(overall_rate = round(total_wins / total_games, 3)) %>%
-  arrange(desc(overall_rate))
+The table below shows the candidate win rate for each map. `times_candidate` is how many games the map appeared as an option, `times_won` is how many times it was chosen, and `vote_wins` counts only wins where the map got strictly more votes (not tie-default wins). `win_rate` is the overall proportion and `vote_win_rate` only counts genuine vote victories.
 
-overall_rate
-```
-
-```{r}
+```{r message=FALSE, warning=FALSE}
 # candidate rate: how often each map won when it was actually an option
 candidates <- voted_games %>%
   pivot_longer(cols = c(Map1, Map2), names_to = "position", values_to = "map") %>%
@@ -79,23 +78,33 @@ candidates <- candidates %>%
 candidates
 ```
 
-```{r}
+The bar chart below visualizes these win rates, making it easy to see which maps consistently come out on top when they're on the ballot.
+
+```{r fig.align='center', fig.width=7, fig.height=5}
 ggplot(candidates, aes(x = reorder(map, win_rate), y = win_rate)) +
   geom_col(fill = "steelblue") +
   coord_flip() +
   labs(title = "Map Win Rate When Listed as a Candidate",
        x = "Map", y = "Win Rate") +
-  theme_minimal()
+  theme_minimal() +
+  theme(
+    panel.grid.major.x = element_line(color = "gray80", linewidth = 0.5),
+    panel.grid.minor.x = element_line(color = "gray90", linewidth = 0.3)
+  )
 ```
 
-```{r}
-# tie analysis: find games where votes were equal (Map1 wins by default in a tie)
+Nuketown '84, Crossroads Strike, and Raid all stand out with win rates above 75%, meaning players strongly prefer these maps when they show up as options. On the low end, maps like Moscow and Cartel are chosen less than half the time, suggesting players tend to vote against them. Nuketown '84 Halloween appears to have a 100% win rate, but it only shows up once in the data, so it was likely a limited-time seasonal map that effectively had no real competition, so it's not a meaningful data point.
+
+### Tie Analysis
+
+Since ties are broken in favor of `Map1`, it's worth checking whether certain maps benefit from this rule more than others.
+
+```{r message=FALSE, warning=FALSE}
 tie_games <- voted_games %>%
   filter(grepl("^[0-9]+ to [0-9]+$", MapVote)) %>%
   separate(MapVote, into = c("map1_votes", "map2_votes"), sep = " to ", convert = TRUE) %>%
   filter(map1_votes == map2_votes)
 
-# which maps benefited most from tie wins
 tie_summary <- tie_games %>%
   count(Map1, name = "tie_wins") %>%
   arrange(desc(tie_wins))
@@ -103,12 +112,13 @@ tie_summary <- tie_games %>%
 tie_summary
 ```
 
-Based on the map win rate table, it would seem that Nuketown 84' is the most likely map to be chosen when presented as an option, followed by Crossroads Strike and Raid (all have above a 75% chance of being selected when listed as an option). 
-Although at first glance it appears that Nuketown 84' Halloween is the most likely to be chosen, it is only played once in our dataset and can be considered an insignificant outlier since it was likely a limited-time event map which had its own playlist and thus is the only option to play next. 
+Something interesting here: the maps that show up most often as `Map1` in a tie are Moscow, Cartel, Apocalypse, Zoo, and The Pines. They are all maps with below-50% overall win rates. My guess is that ties tend to happen when neither map on the ballot is particularly popular and players are more or less indifferent between the two. Raid, by contrast, had only two ties in the whole dataset, which lines up with its high win rate, meaning that when Raid is an option, players normally don't split their votes.
 
-When checking if ties could have an impact on map selection, an interesting thing I noticed is that the maps which have the most tie wins (they are map1 in the selection) are normally maps chosen less in the whole data set. Moscow, Cartel, Apocalypse, Zoo, and The Pines are all chosen less then 50% of the time when in the map selection pool and yet have the highest rates of ties. My hypothesis would be that ties most often occur when the options for the next map are generally disliked or viewed in indifference by the player population. 
+### Answer to the Research Question
 
-This all being said, it is worth noting that the map Raid only had one tie in the entire dataset. Along with its regular win rate of 77.6%, it could be deduced that this is the most popular map when presented as an option and is the "best" map. 
+Based on the win rate table, Nuketown '84 is the most likely map to win the vote when it's listed as an option, followed by Crossroads Strike and Raid. All three have win rates above 75%. Nuketown '84 Halloween looks like the top performer at first glance, but given it only appeared once it's really just an outlier and shouldn't be read as meaningful.
+
+When tie wins are factored out, Raid makes a strong case for being the most genuinely popular map, as it has a 77.6% win rate and almost never ends in a tie, meaning players are actively voting for it rather than just having it win by default.
 
 ## Task2
 
