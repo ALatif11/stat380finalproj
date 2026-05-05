@@ -150,8 +150,13 @@ Based on the data, I think it is safe to say Nuketown '84 is the most popular ma
 ## Task2
 
 ### Conversation with AI, prompts and results
+
+**I am not sure if you want the complete answer from AI from reading instruction, I put it here in case you need this**
+**If it's not, skip this part and go to sub section "Discussion of prompt in terms of each round of prompt and reply" under this, where conversation is highly refined and concluded**
+
 Used generative AI: ChatGPT
 Prompt1: I have uploaded 4 csv and here is the background of those datasets, get yourself familiar with those and we are going to do some data cleaning and EDA latter: [pasted the background introduction of all 4 datasets and attached csv files]
+
 *ChatGPT replied nothing
 
 Prompt2: Here is the instruction: [pasted the requirements of task1] Now help me write a complete solution of this question in R with annotation to major steps. You can solve things step by step and ask me what to do now while providing me options.
@@ -173,9 +178,9 @@ library(ggplot2)
 library(forcats)
 
 # Read in datasets
-p1 <- read.csv("CODGames_p1_380.csv", stringsAsFactors = FALSE)
-p2 <- read.csv("CODGames_p2_380.csv", stringsAsFactors = FALSE)
-maps <- read.csv("CODMaps.csv", stringsAsFactors = FALSE)
+p1 <- read.csv("C:/Users/alice/Downloads/CODGames_p1_380.csv", stringsAsFactors = FALSE)
+p2 <- read.csv("C:/Users/alice/Downloads/CODGames_p2_380.csv", stringsAsFactors = FALSE)
+maps <- read.csv("C:/Users/alice/Downloads/CODMaps.csv", stringsAsFactors = FALSE)
 
 # Combine player datasets
 cod_games <- bind_rows(
@@ -536,10 +541,339 @@ Use 839 rows for candidate/winner proportions, then use 674 rows to study tie wi
 
 This is much stronger than using only 674.
 
-### Discussion of prompt
+Prompt 6:
+Tell me, by the end of the last conversation about it, have you fulfilled all the requirements asked in description? In case you forgot it, the requirements are "*pasted requirements of task1"
+
+ChatGPT: Yes, what you have done:
+1. Correct strategy (very important)
+  You made a strong modeling decision.
+2. Data cleaning awareness.
+  Detected invalid MapVote
+  Identified ~165 problematic rows
+  Avoided blindly dropping everything
+3. 
+What you have not done:
+1. Final table    ❌ Missing
+2. Tie vs vote breakdown      ❌ Missing
+3. Visualization  ❌ Missing
+4. Written explanation  ❌ Missing
+4. Map name cleaning (explicit)
+
+Solutions:
+Step 1 — Build final dataset (MOST IMPORTANT)
+Create something like:
+```{r}
+# reshape to long format for candidates
+candidates <- cod_games_clean %>%
+  select(Map1, Map2, Choice) %>%
+  pivot_longer(cols = c(Map1, Map2), values_to = "map") %>%
+  filter(!is.na(map))
+
+# count candidates
+candidate_counts <- candidates %>%
+  count(map, name = "n_candidate")
+
+# count wins
+win_counts <- cod_games_clean %>%
+  count(Choice, name = "n_win") %>%
+  rename(map = Choice)
+
+# merge
+final_table <- candidate_counts %>%
+  left_join(win_counts, by = "map") %>%
+  mutate(n_win = replace_na(n_win, 0),
+         win_rate = n_win / n_candidate)
+```
+
+Step 2 — Add tie vs real win (for 674 rows)
+```{r}
+valid_votes <- cod_games_clean %>%
+  filter(str_detect(MapVote, "^[0-9]+ to [0-9]+$"))
+
+valid_votes <- valid_votes %>%
+  separate(MapVote, into = c("v1", "v2"), sep = " to ", convert = TRUE) %>%
+  mutate(
+    win_type = case_when(
+      v1 > v2 & Choice == Map1 ~ "vote",
+      v2 > v1 & Choice == Map2 ~ "vote",
+      v1 == v2 & Choice == Map1 ~ "tie",
+      TRUE ~ "other"
+    )
+  )
+```
+
+Step 3 — Visualization
+```{r}
+ggplot(final_table, aes(x = reorder(map, win_rate), y = win_rate)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Probability of Winning Given Map is Candidate",
+       x = "Map",
+       y = "Win Probability")
+```
+Prompt 7:
+Great, Now did all the requirements are checked? If yes, the full final R code clean and polished.
+
+ChatGPT:
+### Final solution given by AI 
+```{r}
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(forcats)
+library(knitr)
+
+# -----------------------------
+# 1. Read in data
+# -----------------------------
+
+p1 <- read.csv("CODGames_p1_380.csv", stringsAsFactors = FALSE)
+p2 <- read.csv("CODGames_p2_380.csv", stringsAsFactors = FALSE)
+maps <- read.csv("CODMaps.csv", stringsAsFactors = FALSE)
+
+# -----------------------------
+# 2. Combine player datasets
+# -----------------------------
+
+cod_games <- bind_rows(
+  p1 %>% mutate(Player = "Player 1"),
+  p2 %>% mutate(Player = "Player 2")
+)
+
+# -----------------------------
+# 3. Clean map names
+# -----------------------------
+
+clean_map_name <- function(x) {
+  x <- str_trim(x)
+
+  x <- case_when(
+    x %in% c("Collaterol Strike", "Collaterel Strike",
+             "Collateral Striek", "Collateral") ~ "Collateral Strike",
+    x == "Deprogam" ~ "Deprogram",
+    x == "Drive-in" ~ "Drive-In",
+    x %in% c("Miami Stirke", "Miami Sstrike") ~ "Miami Strike",
+    x == "Riad" ~ "Raid",
+    x == "Ruah" ~ "Rush",
+    x == "Amrada Strike" ~ "Armada Strike",
+    x %in% c("APocalypse", "Apocolypse") ~ "Apocalypse",
+    x == "Deisel" ~ "Diesel",
+    x == "yamantau" ~ "Yamantau",
+    TRUE ~ x
+  )
+
+  x
+}
+
+cod_games_clean <- cod_games %>%
+  mutate(
+    Map1 = clean_map_name(Map1),
+    Map2 = clean_map_name(Map2),
+    Choice = clean_map_name(Choice),
+    MapVote = str_trim(MapVote),
+    MapVote = str_replace_all(MapVote, "\\s+", " ")
+  )
+
+# -----------------------------
+# 4. Main candidate/winner analysis
+# Use all rows where Map1 and Map2 are available
+# -----------------------------
+
+candidate_games <- cod_games_clean %>%
+  filter(!is.na(Map1), !is.na(Map2))
+
+candidate_long <- candidate_games %>%
+  mutate(GameID = row_number()) %>%
+  pivot_longer(
+    cols = c(Map1, Map2),
+    names_to = "MapPosition",
+    values_to = "Map"
+  )
+
+final_table <- candidate_long %>%
+  group_by(Map) %>%
+  summarise(
+    Times_Candidate = n(),
+    Total_Wins = sum(Map == Choice),
+    Win_Proportion = round(Total_Wins / Times_Candidate, 3),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(Win_Proportion))
+
+kable(final_table,
+      caption = "Map Vote Win Probability Given the Map Was Listed as a Candidate")
+
+# -----------------------------
+# 5. Tie/default analysis
+# Use only rows with valid vote-count format
+# -----------------------------
+
+valid_votes <- candidate_games %>%
+  filter(str_detect(MapVote, "^[0-9]+ to [0-9]+$")) %>%
+  separate(
+    MapVote,
+    into = c("Map1Votes", "Map2Votes"),
+    sep = " to ",
+    convert = TRUE
+  )
+
+tie_vote_long <- valid_votes %>%
+  mutate(GameID = row_number()) %>%
+  pivot_longer(
+    cols = c(Map1, Map2),
+    names_to = "MapPosition",
+    values_to = "Map"
+  ) %>%
+  mutate(
+    CandidateVotes = ifelse(MapPosition == "Map1", Map1Votes, Map2Votes),
+    OpponentVotes = ifelse(MapPosition == "Map1", Map2Votes, Map1Votes),
+    Won = Map == Choice,
+    Vote_Win = Won & CandidateVotes > OpponentVotes,
+    Tie_Default_Win = Won & MapPosition == "Map1" & CandidateVotes == OpponentVotes
+  )
+
+tie_table <- tie_vote_long %>%
+  group_by(Map) %>%
+  summarise(
+    Valid_Vote_Candidate_Times = n(),
+    Vote_Wins = sum(Vote_Win),
+    Tie_Default_Wins = sum(Tie_Default_Win),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(Vote_Wins + Tie_Default_Wins))
+
+kable(tie_table,
+      caption = "Vote Wins and Tie-Default Wins Among Matches with Valid Vote Counts")
+
+# -----------------------------
+# 6. Data quality check
+# -----------------------------
+
+invalid_votes <- candidate_games %>%
+  filter(!str_detect(MapVote, "^[0-9]+ to [0-9]+$"))
+
+data_quality_summary <- data.frame(
+  Total_Rows = nrow(cod_games_clean),
+  Rows_With_Map_Candidates = nrow(candidate_games),
+  Rows_With_Valid_Vote_Counts = nrow(valid_votes),
+  Rows_With_Invalid_Vote_Counts = nrow(invalid_votes),
+  Percent_Invalid_Vote_Counts =
+    round(100 * nrow(invalid_votes) / nrow(candidate_games), 2)
+)
+
+kable(data_quality_summary,
+      caption = "Summary of Rows Used and Excluded")
+
+# Optional: check which maps appear in excluded vote rows
+excluded_choice_table <- invalid_votes %>%
+  count(Choice, sort = TRUE)
+
+kable(excluded_choice_table,
+      caption = "Winning Maps Among Rows with Invalid Vote Counts")
+
+# -----------------------------
+# 7. Visualization
+# -----------------------------
+
+ggplot(final_table,
+       aes(x = reorder(Map, Win_Proportion),
+           y = Win_Proportion)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(
+    title = "Probability of Winning Given Map Is Listed as a Candidate",
+    x = "Map",
+    y = "Win Probability"
+  ) +
+  theme_minimal()
+```
 
 
-### Comparison with result in task1
+### Discussion of prompt in terms of each round of prompt and reply
+Prompt 1: I know throwing too much information and tasks at once would cause AI solving each small task with little process and possible neglect to some tasks so I decided to separate background information of task and my command and started the conversation by offering materials, the 4 csvs and background information of 4 csvs. 
+Propmt 2: I restated requirements in task 1 in a neater way and required AI to write a complete solution of this question in R with annotation to major steps so I can track work flow and logic of AI doing this process. Considering there are a few tasks I stated that AI can solve things step by step and ask me what to do now while providing me options, but the Chat answered everything at once by reading csvs, writing code chunks to combine Player 1 and Player 2 data, clean map names, parse MapVote, count candidate appearances, count wins, calculate win proportions, and create a visualization.
+Prompt 3: I notice warning message saying There are 165 missing pieces filled with NA in 165 rows and became concerned about potential problem in your data cleansing process, So I figured it out and asked AI's opinion about would to deal with NA and plausible solution to it. AI explained that some vote entries were missing or not in "X to Y" format. I suggested filtering valid vote rows only for tie/default analysis, while documenting excluded rows.
+Prompt 4: I asked to create code check how many rows you are losing and whether it biases results and sent it diagnosis result, when MapVote parsing produced 165 invalid rows, AI explained that some vote entries were missing or not in "X to Y" format and suggested filtering valid vote rows only for tie/default analysis, while documenting excluded rows.
+Prompt 5: I followed up diagnostic check results and AI said the analysis was on the right track but should be improved by using all 839 rows with candidate maps for the main win-proportion analysis, and only the 674 valid-vote rows for tie/default analysis. 
+Prompt 6: I asked AI if we fulfilled requirements and AI checked the requirements and identified missing pieces: final table, visualization, tie/default breakdown, written explanation, and explicit data cleaning.
+Prompt 7: I asked AI to give an annotated complete workflow and got it.
+
+Generally, the AI gave a good performance for giving overall plan and techniques-related questions' solution. However ChatGPT don't read column names actively, so when instruction or column names go wrong, it will fail to figure out problems without human instruction and correction. AI is also likely to fall into illusion or task-skipping once there are a lot of tasks to check, so I separated tasks step by step to make AI's answer clear and detailed. In the middle of conversation, AI digressed to irrelevant very detailed checks when I mention a potential problem exist. Again, from this experience we learned for important cases or ones with heavy workload, AI can only be a helper not the director. 
+
+### Comparison with result in task 1
+
+1: Clarity and explanation of approach
+
+The written version demonstrates a clear and well-structured strategy by explicitly explaining the approach before presenting any code. This makes it easier for a reader to follow the reasoning without needing to interpret the code itself, which aligns well with the assignment requirement that analysis should be understandable through written explanation. In contrast, the AI-generated version focuses more heavily on the computational steps and structured workflow, with less emphasis on upfront explanation. While the AI solution is organized, the written version is stronger in terms of communication because it prioritizes clarity and ensures that the logic of the analysis is immediately accessible to the reader.
+
+2: Methodological rigor and correctness
+
+The AI-generated version is stronger in terms of methodological rigor and alignment with the research question. It strictly defines the main metric as the probability of winning given that a map is a candidate and ensures that only valid observations are used in the calculation. It also carefully handles incomplete or messy data by separating rows with valid vote counts and excluding problematic entries, reducing the risk of biased results. In contrast, while the written version produces reasonable results, it does not explicitly document how missing or inconsistent data are handled. As a result, the AI-generated solution provides greater confidence in the correctness and statistical validity of the results.
+
+3: Depth of interpretation and insight
+
+The written version excels in interpreting the results and providing meaningful insights. It not only identifies which maps have higher win probabilities but also discusses possible explanations, such as the impact of limited-time maps or player preferences. Additionally, it considers tie behavior and offers plausible reasoning for why certain maps may experience more ties. The AI-generated version, while accurate in computation, is more focused on producing results and less on interpreting them in a broader context. Therefore, the written solution demonstrates a stronger understanding of the data by connecting numerical results to real-world implications.
+
+4: Structure, reproducibility, and transparency
+
+The AI-generated version has an advantage in terms of structure and reproducibility. It organizes the workflow into clearly defined steps, separates different parts of the analysis (such as main probability calculation and tie analysis), and includes modular code that is easy to reuse and verify. It also explicitly reports data quality issues, such as how many observations were excluded and why, which improves transparency and credibility. The written version, while clear in explanation, is less systematic in documenting these technical details. This makes the AI-generated approach stronger from a programming and reproducibility perspective.
+
+Overall, the written version is stronger in terms of clarity, interpretation, and communication, making the results easier to understand and more insightful. The AI-generated version, however, is more rigorous and methodologically sound, particularly in its handling of data quality and its strict alignment with the research question. Both approaches have clear strengths, and neither is strictly superior in all aspects. A combined approach that integrates the structured, data-driven rigor of the AI-generated solution with the clear explanations and deeper interpretations of the written version would provide the most complete and effective analysis.
+
+### Recap and possible fixation of 2 task results
+There is difference between the result of task1's and task2's result.
+
+For AI, the general workflow and noticeable points are:
+
+1. Reads the four datasets, then combines the two player datasets into one match-level dataset. Since the project focuses on map voting, the code keeps the voting-related variables such as Map1, Map2, Choice, and MapVote.
+2. the code cleans map names using a custom function. This fixes trailing spaces, inconsistent capitalization, and misspelled map names without editing the original CSV files. I consider this as an important step because the same map could otherwise be counted as different maps.
+3. The main analysis uses all rows where both Map1 and Map2 are available. These rows tell which maps were candidates. The data are reshaped so each map option gets its own row, then the code counts how many times each map appeared as a candidate, how many times it was the winning Choice, and the win proportion:
+Win Proportion=Total Wins/Times Candidate
+4. A separate tie/default analysis uses only rows with valid MapVote formatting, such as "3 to 2". This part separates wins caused by receiving more votes from wins caused by a tie where Map1 wins automatically.
+5. Counts how many rows were usable and how many had invalid vote-count information for quality control. This documents missing or messy MapVote data and helps explain why the main win-proportion analysis and tie/default analysis use different row counts.
+6. Creates a bar plot of win probability by map. The main answer should come from final_table and the visualization, while tie_table supports the discussion about whether maps won by actual votes or by tie-default rules.
+
+For the written version, the general workflow and noticeable points are:
+
+1. Reads the two player datasets and combines them into a single dataset. The analysis focuses on map voting behavior, so it keeps the key variables related to voting such as Map1, Map2, Choice, and MapVote.
+2. Cleans map names using a custom function that corrects misspellings and inconsistent capitalization. This step ensures that the same map is not counted multiple times under slightly different names, which is important for producing accurate counts.
+3. Filters the data to keep only games where both Map1 and Map2 are present. This removes cases where a player joined after voting, ensuring that only valid voting situations are included in the analysis.
+4. Computes two types of win-related metrics. First, it calculates the overall rate at which each map is selected across all games. Second, it reshapes the data so each candidate map is represented in its own row and computes how often each map wins when it is listed as a candidate:
+Win Rate=Times Won/Times Candidate
+5. Performs a separate vote-based analysis using only rows with valid vote counts (e.g., "3 to 2"). This distinguishes between wins that occur because a map received more votes and those that result from tie situations, providing a more detailed understanding of how maps win.
+6. Conducts a tie analysis by identifying games where both maps received the same number of votes. It then counts how often each map benefits from the default rule where Map1 wins in a tie, adding further context to the results.
+7. Visualizes the results using a bar plot of win rate by map. The main conclusions come from the candidate win rates and the visualization, while the vote-based and tie analyses provide supporting evidence for interpreting the results.
+
+Prompt fix: I believe you did not include the overall selection frequency and you missed your interpretation for research question according to generated result (*attached result)
+ChatGPT:
+Ah, yes, here is the fixation:
+Add this block:
+```{r}
+total_games <- nrow(cod_games_clean)
+
+overall_rate <- cod_games_clean %>%
+  count(Choice, name = "Total_Wins") %>%
+  mutate(
+    Overall_Rate = round(Total_Wins / total_games, 3)
+  ) %>%
+  arrange(desc(Overall_Rate))
+
+kable(overall_rate,
+      caption = "Overall Frequency Each Map Was Selected")
+```
+
+Answer to Research Question:
+
+The maps most likely to win the vote when they are listed as a candidate are those with the highest win proportion, defined as the number of times a map is selected divided by the number of times it appears as an option.
+
+From the results, Nuketown ’84 Halloween has the highest win probability (1.000), meaning it won every time it appeared as a candidate. However, this result is based on only one observation, so it is not reliable for general conclusions. Among maps with a larger number of observations, Nuketown ’84 (0.821), Crossroads Strike (0.776), and Raid (0.750) are the most likely to win the map vote. These maps consistently perform well when offered as options, suggesting they are strongly preferred by players.
+
+Other maps such as Diesel (0.709), Standoff (0.702), and Slums (0.659) also show relatively high win probabilities, indicating above-average performance. In contrast, maps like Apocalypse (0.413), Miami Strike (0.390), and Miami (near 0) have much lower probabilities, suggesting they are less favored when competing against other options.
+
+The vote-based analysis supports these findings. For example, maps like Diesel and Crossroads Strike achieve a substantial number of wins through actual vote majorities, indicating genuine player preference. Meanwhile, some maps (e.g., Moscow and The Pines) receive a noticeable number of tie-default wins, suggesting that part of their success may be influenced by the rule that Map1 wins in a tie rather than strong voter support.
+
+Overall, the analysis shows that Nuketown ’84, Crossroads Strike, and Raid are the most consistently preferred maps, as they combine high win probabilities with a reasonable number of appearances. These maps are therefore the most likely to win the map vote when presented as options.
 
 ## Task 3 — Inference
 
