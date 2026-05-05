@@ -693,7 +693,7 @@ The residuals vs. fitted plot has a bit of a fan shape, with the spread getting 
 
 ### Answer to the Research Question
 
-Based on the model output, it would seem that game type does have a statistically significant effect on TotalXP even after accounting for Score, with the partial F-test returning F = 14.05 and p = 6.23e-09. Score is doing most of the heavy lifting though, which makes sense. The Score coefficient is `r round(coef(model_task3)["Score"], 2)`, meaning each additional point of Score adds roughly that many XP regardless of mode. An interesting thing I noticed is that even though GameType clears the significance bar as a group, none of the individual game type levels differ significantly from Domination on their own. Kill Confirmed and TDM both trend negative, which lines up with what the EDA showed since kill-based modes tend to produce less XP than objective ones, but neither individually reaches the 0.05 threshold. I think it is safe to say that game type does matter for TotalXP independently of performance, just that the effect is spread across modes rather than being driven by any one in particular.
+Based on the model output, it would seem that game type does have a statistically significant effect on TotalXP even after accounting for Score, with the partial F-test returning F = 14.05 and p = 6.23e-09. Score is doing most of the heavy lifting though, which makes sense. The Score coefficient is 2.71, meaning each additional point of Score adds roughly 2.71 XP regardless of mode. An interesting thing I noticed is that even though GameType clears the significance bar as a group, none of the individual game type levels differ significantly from Domination on their own. Kill Confirmed and TDM both trend negative, which lines up with what the EDA showed since kill-based modes tend to produce less XP than objective ones, but neither individually reaches the 0.05 threshold. I think it is safe to say that game type does matter for TotalXP independently of performance, just that the effect is spread across modes rather than being driven by any one in particular.
 
 
 ## Task 4 — Prediction
@@ -739,7 +739,7 @@ It is worth checking the class balance before fitting anything. If one outcome i
 I split the data 80/20 into training and test sets. The seed ensures the split is the same every time the code is run, and it also means the comparison with logistic regression will use the exact same test observations.
 
 ```{r}
-set.seed(380)
+set.seed(123)
 train_idx <- sample(nrow(cod_t4), size = 0.8 * nrow(cod_t4))
 train_t4  <- cod_t4[train_idx, ]
 test_t4   <- cod_t4[-train_idx, ]
@@ -756,7 +756,7 @@ Random Forest builds a large number of decision trees, each trained on a differe
 The main tuning parameter for Random Forest is `mtry`, which controls how many predictors are randomly considered at each split. The default for classification is the square root of the number of predictors, so with 4 predictors that is 2. I used `tuneRF` to check whether a different value performs better based on the out-of-bag error.
 
 ```{r fig.align='center', fig.width=6, fig.height=4}
-set.seed(380)
+set.seed(123)
 tuneRF(
   x          = train_t4[, -1],
   y          = train_t4$Outcome,
@@ -772,7 +772,7 @@ Based on the plot, `mtry = 2` gives the lowest OOB error, so that is what I used
 #### Model
 
 ```{r}
-set.seed(380)
+set.seed(123)
 rf_model <- randomForest(
   Outcome ~ Score + Eliminations + Deaths + GameType,
   data       = train_t4,
@@ -793,13 +793,14 @@ The OOB error shown above is essentially the model evaluating itself on observat
 ```{r}
 rf_preds <- predict(rf_model, newdata = test_t4)
 
-table(Predicted = rf_preds, Actual = test_t4$Outcome)
+rf_conf <- table(Predicted = rf_preds, Actual = test_t4$Outcome)
+rf_conf
 
 rf_accuracy <- mean(rf_preds == test_t4$Outcome)
 cat("Random Forest Accuracy:", round(rf_accuracy, 4))
 ```
 
-62% accuracy is better than guessing, though it is not a particularly strong result. Looking at the confusion matrix, the model correctly predicted 42 losses and 48 wins, but misclassified 29 actual wins as losses and 26 actual losses as wins. It is making errors in both directions fairly evenly, so it is not simply defaulting to predicting one class.
+62.76% accuracy is better than guessing, though it is not a particularly strong result. Looking at the confusion matrix, the model correctly predicted 28 losses and 63 wins, but misclassified 28 actual wins as losses and 26 actual losses as wins. It is making errors in both directions fairly evenly, so it is not simply defaulting to predicting one class.
 
 ---
 
@@ -953,4 +954,14 @@ plot(log_roc)
 ```
 The AUC value is 0.7104, which suggests that the model has a reasonable ability to distinguish between wins and losses. In general, an AUC between 0.7 and 0.8 is considered acceptable, so this model demonstrates fair classification performance, though it is not highly accurate.
 
-In a conclusion, the logistic regression model provides a reasonable but not strong prediction of match outcomes. While the model performs better than chance and demonstrates acceptable discrimination (AUC ≈ 0.71), its accuracy suggests that additional predictors or more complex models may improve performance. Among the predictors, eliminations and deaths are the most important factors influencing match outcome, while score and game type do not contribute significantly after accounting for these variables.
+In conclusion, the logistic regression model provides a reasonable but not strong prediction of match outcomes. While the model performs better than chance and demonstrates acceptable discrimination (AUC ≈ 0.71), its accuracy suggests that additional predictors or more complex models may improve performance. Among the predictors, eliminations and deaths are the most important factors influencing match outcome, while score and game type do not contribute significantly after accounting for these variables.
+
+---
+
+### Comparison
+
+Both models were trained on the same 80/20 split using `set.seed(123)`, so the accuracy numbers are directly comparable. Random Forest achieved 62.76% accuracy on the test set, while logistic regression came in at 66.9%. Logistic regression also has an AUC of 0.71, which gives a sense of how well it separates wins from losses across different probability cutoffs rather than just at the default 0.5 threshold. Random Forest does not produce this metric directly, so on that front logistic regression has an edge in terms of evaluation.
+
+Based on accuracy alone, logistic regression performs better by about 4 percentage points. An interesting thing I noticed though is that both models agree pretty closely on which predictors matter. Deaths and Eliminations drove most of the predictive power in both cases, while Score and GameType contributed less once those two were already in the model. That consistency across two pretty different methods suggests it is a real pattern in the data and not just an artifact of one particular algorithm.
+
+Overall, logistic regression is the better choice here, both because it outperforms the random forest on accuracy and because it is more interpretable. The coefficients tell you directly how each predictor shifts the probability of winning, which is harder to get out of a random forest. That said, neither model is particularly strong at 63-67%, which suggests that Score, Eliminations, Deaths, and GameType alone do not fully capture what separates a winning game from a losing one.
