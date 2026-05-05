@@ -178,9 +178,9 @@ library(ggplot2)
 library(forcats)
 
 # Read in datasets
-p1 <- read.csv("C:/Users/alice/Downloads/CODGames_p1_380.csv", stringsAsFactors = FALSE)
-p2 <- read.csv("C:/Users/alice/Downloads/CODGames_p2_380.csv", stringsAsFactors = FALSE)
-maps <- read.csv("C:/Users/alice/Downloads/CODMaps.csv", stringsAsFactors = FALSE)
+p1 <- read.csv("CODGames_p1_380.csv", stringsAsFactors = FALSE)
+p2 <- read.csv("CODGames_p2_380.csv", stringsAsFactors = FALSE)
+maps <- read.csv("CODMaps.csv", stringsAsFactors = FALSE)
 
 # Combine player datasets
 cod_games <- bind_rows(
