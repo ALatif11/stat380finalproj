@@ -62,6 +62,8 @@ voted_games <- cod %>%
   filter(Map1 != "" & Map2 != "")
 ```
 
+The table below shows how often each map was selected as the winning map across all games in the dataset, including matches where the player joined after the vote had already taken place.
+
 ```{r}
 # overall rate: how often each map was chosen out of all games
 total_games <- nrow(cod)
@@ -542,7 +544,7 @@ This is much stronger than using only 674.
 
 ### Relevant Information
 
-The dataset contains several different game types in the `GameType` variable. Each game type has its own objectives — for example, in **Hardpoint** teams earn points by holding down a rotating location, while in **TDM** (Team Deathmatch) points come from eliminating enemies. Since the modes play out differently and can run for different lengths, it makes sense that game type would have some effect on how much total XP a player walks away with.
+The `GameType` variable records what mode was played each match. Hardpoint has teams fighting over a rotating location for points, while TDM is purely about getting kills. These modes play out completely differently, with different pacing, different time limits, and different ways to earn XP. My question here is whether the mode itself changes how much total XP you walk away with, even when you played equally well in both.
 
 **Research Question:** How does the game type affect TotalXP after accounting for the player's Score?
 
@@ -550,7 +552,7 @@ The dataset contains several different game types in the `GameType` variable. Ea
 
 ### Data Cleaning
 
-One issue with the `GameType` column is that it has both normal and Hardcore (HC) versions of each mode listed separately (e.g., `”HC - TDM”` and `”TDM”`). Since there's no distinction between them for our purposes, we strip the `”HC - “` prefix to merge them together. We also drop any rows with missing values in `TotalXP`, `Score`, or `GameType` before moving forward.
+One thing I noticed is that the `GameType` column lists both normal and Hardcore (HC) versions of each mode separately (e.g., `”HC - TDM”` and `”TDM”`). Since there is no real distinction between them for this analysis, I stripped the `”HC - “` prefix to merge them. I also dropped any rows with missing values in `TotalXP`, `Score`, or `GameType`.
 
 ```{r message=FALSE, warning=FALSE}
 library(stringr)
@@ -572,11 +574,11 @@ unique(cod_task3$GameType)
 
 ### Exploratory Data Analysis
 
-Before jumping into modeling, it helps to look at how `TotalXP` and `Score` are distributed across game types. This gives us a sense of what we're working with and whether the data actually supports the idea that game type matters.
+Before fitting anything, it helps to look at how `TotalXP` and `Score` are distributed across game types to get a sense of whether the differences are large enough to matter.
 
 #### Summary Statistics
 
-The table below shows basic summary statistics for `TotalXP` and `Score` broken down by game type. It's a good starting point for seeing whether the modes actually differ from each other.
+The table below breaks down mean, median, and standard deviation of both `TotalXP` and `Score` for each game type.
 
 ```{r message=FALSE}
 task3_stats <- cod_task3 %>%
@@ -595,7 +597,7 @@ task3_stats <- cod_task3 %>%
 task3_stats
 ```
 
-Right away the table shows that Hardpoint and Domination both have higher average XP compared to TDM and Kill Confirmed, which makes sense since those modes tend to involve more sustained team activity and likely run longer. Interestingly, Score also varies by game type — Domination scores cluster very tightly compared to the other modes. This matters because if we just compare raw XP across modes without accounting for Score, we'd be mixing up the effect of game type with the effect of how well the player performed. That's why controlling for Score in the model is important.
+Looking at the table, it would seem that Hardpoint and Domination both average noticeably more XP than TDM and Kill Confirmed, which makes sense since those modes involve more sustained team activity and likely run longer. An interesting thing I noticed is that Score also varies across modes, with Domination scores clustering much more tightly than the others. This matters because if I just compared raw XP across modes without accounting for Score, the results would be mixing up the effect of game type with how well the player performed, which is why Score needs to be in the model. It is also worth noting that Domination only has 14 observations in this dataset, so its estimates should be interpreted with some caution.
 
 ---
 
@@ -613,7 +615,7 @@ ggplot(cod_task3, aes(x = reorder(GameType, TotalXP, median), y = TotalXP)) +
   theme_minimal(base_size = 12)
 ```
 
-The boxplots make the differences pretty clear. Domination and Hardpoint have noticeably higher median XP, while Kill Confirmed is at the bottom. There's also a lot of spread within each mode though, which suggests that game type alone doesn't explain everything — how well you played (your Score) clearly plays a role too. This is another reason why we need to account for Score in the model.
+The boxplots make the differences fairly clear. Domination and Hardpoint have noticeably higher median XP, while Kill Confirmed sits at the bottom. There is also a lot of spread within each mode though, which suggests game type alone does not tell the whole story, and how well you personally played clearly matters too.
 
 ---
 
@@ -631,7 +633,7 @@ ggplot(cod_task3, aes(x = reorder(GameType, Score, median), y = Score)) +
   theme_minimal(base_size = 12)
 ```
 
-This confirms what the summary table hinted at — Score is not spread evenly across game types. Domination in particular has a very narrow score range compared to Hardpoint or TDM. So if we're trying to measure how much game type affects XP, we can't ignore Score, since different modes naturally produce different score distributions in the first place.
+This confirms what the summary table hinted at. Score is not spread evenly across game types, with Domination in particular having a much narrower score range than Hardpoint or TDM. If I only looked at raw XP differences across modes without accounting for Score, the results would be misleading since the modes naturally produce different score distributions to begin with.
 
 ---
 
@@ -651,20 +653,20 @@ ggplot(cod_task3, aes(x = Score, y = TotalXP, color = GameType)) +
   theme(legend.position = "right")
 ```
 
-This is probably the most useful plot in the EDA. There's a clear positive relationship between Score and TotalXP in every game type, which makes sense — better performance means more XP. What's interesting though is that the slopes look quite different across modes. Hardpoint has a much steeper trend line than TDM or Kill Confirmed, meaning each extra point of Score earns you more XP in Hardpoint than it would in other modes. This suggests there might be an interaction between Score and GameType, which we'll keep in mind. For now we'll fit the simpler additive model since it's more interpretable and easier to work with given our class material.
+This is probably the most useful plot in the EDA. There is a clear positive relationship between Score and TotalXP in every game type, which makes sense since better performance means more XP. An interesting thing I noticed is that the slopes look quite different across modes. Hardpoint has a much steeper trend line than TDM or Kill Confirmed, meaning each extra point of Score earns more XP in Hardpoint than it would in other modes. My hypothesis is that this points to a possible interaction between Score and GameType, though for this analysis I will fit the simpler additive model since it is more interpretable.
 
 ---
 
 ### Model: Multiple Linear Regression
 
-To answer the research question, we fit a multiple linear regression model with `TotalXP` as the response, `Score` as a continuous predictor, and `GameType` as a categorical predictor. Including both in the same model lets us estimate the effect of game type on XP while holding Score constant — which is exactly what the research question is asking for.
+I fit a multiple linear regression with `TotalXP` as the response, `Score` as a continuous predictor, and `GameType` as a categorical one. Putting both in the same model lets Score be held constant, which isolates what game type is actually contributing to XP on its own.
 
 ```{r}
 model_task3 <- lm(TotalXP ~ Score + GameType, data = cod_task3)
 summary(model_task3)
 ```
 
-The `anova()` output runs a partial F-test for `GameType` — basically asking whether adding game type to the model actually helps explain TotalXP beyond what Score already explains.
+The `anova()` output runs a partial F-test for `GameType`, which tells us whether adding game type to the model actually helps explain TotalXP beyond what Score already covers.
 
 ```{r}
 anova(model_task3)
@@ -674,7 +676,7 @@ anova(model_task3)
 
 ### Model Assumptions
 
-Before interpreting the results, we should check whether the model assumptions hold. The two main ones to look at are constant variance (residuals vs. fitted) and normality of residuals (QQ-plot).
+Before reading too much into the coefficients, it's worth checking the residual plots to see if anything looks off.
 
 ```{r fig.align='center', fig.width=9, fig.height=4}
 par(mfrow = c(1, 2))
@@ -685,13 +687,128 @@ plot(model_task3, which = 2, main = "Normal Q-Q")
 par(mfrow = c(1, 1))
 ```
 
-The residuals vs. fitted plot has a bit of a fan shape — the spread gets wider as fitted values increase. This suggests some heteroscedasticity, meaning the variance isn't perfectly constant across the range of predictions. It's not surprising given that high-XP games tend to be more unpredictable in general. This doesn't break the model, but it does mean we should be a little cautious about taking p-values too literally. The QQ-plot looks pretty good through the middle of the data but drifts a bit at the upper tail, which is consistent with a handful of unusually high-XP games pulling the distribution. With the sample size we have, inference should still hold reasonably well.
+The residuals vs. fitted plot has a bit of a fan shape, with the spread getting wider as fitted values increase. This suggests some heteroscedasticity, meaning the variance is not perfectly constant across the range of predictions. It is not too surprising given that high-XP games tend to be harder to predict. It does not break the model, but it is worth being a little cautious about taking the p-values too literally. The QQ-plot looks fairly good through the middle of the data but drifts a bit at the upper tail, which is consistent with a handful of unusually high-XP outlier games. With the sample size available here, inference should still hold reasonably well.
 
 ---
 
 ### Answer to the Research Question
 
-Based on the model output, game type does have a statistically significant effect on TotalXP even after accounting for Score — the partial F-test p-value is well below 0.05. The Score coefficient tells us that higher in-game performance is associated with more XP regardless of what mode you're playing. The GameType coefficients then show how much more or less XP you'd expect in each mode relative to the reference category, holding Score constant. Modes like Hardpoint are associated with notably higher XP, which lines up with what we saw in the EDA — those modes involve capturing and holding positions which probably generate a lot of bonus XP on top of the base score. To directly answer the research question: yes, game type affects TotalXP even after accounting for Score, with objective-based modes generally rewarding players with more total XP than elimination-based ones like TDM.
+Based on the model output, it would seem that game type does have a statistically significant effect on TotalXP even after accounting for Score, with the partial F-test p-value well below 0.05. Score matters too, as expected. The Score coefficient is `r round(coef(model_task3)["Score"], 2)`, meaning each additional point of Score is associated with roughly that many more XP points, holding game type constant. What is interesting though is that the GameType coefficients show that two players with identical Scores can still walk away with different XP totals depending on what mode they played. Hardpoint in particular is associated with `r round(coef(model_task3)["GameTypeHardpoint"], 0)` more XP than the reference game type (Domination) after controlling for Score, which lines up with what was seen in the EDA since holding objectives generates bonus XP that kill-based modes like TDM do not produce. I think it is safe to say that game type does affect TotalXP independently of performance, and objective-based modes tend to pay out more.
 
-## Task4
 
+## Task 4 — Prediction
+
+**Research Question:** Which classification method best predicts match outcome (Win/Loss) using Score, Eliminations, Deaths, and GameType as predictors?
+
+### Data Wrangling
+
+The `Result` column does not just say "Win" or "Loss", it actually stores the match score like `"100-97"`. To get a usable outcome variable, I pulled out the two numbers and compared them to determine who won. I also filtered to only full matches since partial games do not have a complete result, and dropped ties since they do not count as a win or a loss.
+
+```{r message=FALSE, warning=FALSE}
+library(randomForest)
+library(stringr)
+
+cod_t4 <- cod %>%
+  filter(FullPartial == "Full", Result != "", !is.na(Score),
+         !is.na(Eliminations), !is.na(Deaths)) %>%
+  mutate(
+    team_score = as.numeric(str_extract(Result, "^[0-9]+")),
+    opp_score  = as.numeric(str_extract(Result, "[0-9]+$")),
+    Outcome = case_when(
+      team_score > opp_score ~ "Win",
+      team_score < opp_score ~ "Loss",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  filter(!is.na(Outcome)) %>%
+  mutate(
+    Outcome  = factor(Outcome),
+    GameType = factor(GameType)
+  ) %>%
+  select(Outcome, Score, Eliminations, Deaths, GameType)
+
+table(cod_t4$Outcome)
+```
+
+It is worth checking the class balance before fitting anything. If one outcome is way more common than the other, a model could just predict that class every time and still look accurate on paper, which would not actually be useful. The split here is roughly 403 wins to 318 losses, which is a little uneven but not bad enough to cause major problems for the model.
+
+---
+
+### Train/Test Split
+
+I split the data 80/20 into training and test sets. The seed ensures the split is the same every time the code is run, and it also means the comparison with logistic regression will use the exact same test observations.
+
+```{r}
+set.seed(380)
+train_idx <- sample(nrow(cod_t4), size = 0.8 * nrow(cod_t4))
+train_t4  <- cod_t4[train_idx, ]
+test_t4   <- cod_t4[-train_idx, ]
+```
+
+---
+
+### Random Forest
+
+Random Forest builds a large number of decision trees, each trained on a different random sample of the training data. At every split, only a random subset of predictors is considered rather than all of them. That second part is what makes it work well. If every tree saw the same predictors at every split, they would all end up looking similar and making the same errors. By forcing each tree to work with different information, you end up with trees that each make different mistakes, and averaging across them cancels a lot of those errors out. Predicting a new observation is just a vote, with whichever class gets the most votes across all 500 trees winning. It tends to be much more accurate than a single decision tree and does not need much preprocessing.
+
+#### Choosing mtry
+
+The main tuning parameter for Random Forest is `mtry`, which controls how many predictors are randomly considered at each split. The default for classification is the square root of the number of predictors, so with 4 predictors that is 2. I used `tuneRF` to check whether a different value performs better based on the out-of-bag error.
+
+```{r fig.align='center', fig.width=6, fig.height=4}
+set.seed(380)
+tuneRF(
+  x          = train_t4[, -1],
+  y          = train_t4$Outcome,
+  stepFactor = 1.5,
+  improve    = 0.01,
+  plot       = TRUE,
+  trace      = FALSE
+)
+```
+
+Based on the plot, `mtry = 2` gives the lowest OOB error, so that is what I used in the final model.
+
+#### Model
+
+```{r}
+set.seed(380)
+rf_model <- randomForest(
+  Outcome ~ Score + Eliminations + Deaths + GameType,
+  data       = train_t4,
+  mtry       = 2,
+  ntree      = 500,
+  importance = TRUE
+)
+
+rf_model
+```
+
+The OOB error shown above is essentially the model evaluating itself on observations it was not trained on, so it gives a reasonable early estimate of how well it will perform on the actual test set.
+
+---
+
+### Test Set Results
+
+```{r}
+rf_preds <- predict(rf_model, newdata = test_t4)
+
+table(Predicted = rf_preds, Actual = test_t4$Outcome)
+
+rf_accuracy <- mean(rf_preds == test_t4$Outcome)
+cat("Random Forest Accuracy:", round(rf_accuracy, 4))
+```
+
+62% accuracy is better than guessing, though it is not a particularly strong result. Looking at the confusion matrix, the model correctly predicted 42 losses and 48 wins, but misclassified 29 actual wins as losses and 26 actual losses as wins. It is making errors in both directions fairly evenly, so it is not simply defaulting to predicting one class.
+
+---
+
+### Variable Importance
+
+One useful thing about Random Forest is that it can tell us which predictors actually mattered. The left panel shows how much accuracy drops when a variable is shuffled randomly, with a larger drop indicating the model relied on it more heavily. The right panel measures how much each variable reduced impurity across all the splits in all 500 trees.
+
+```{r fig.align='center', fig.width=7, fig.height=4}
+varImpPlot(rf_model, main = "Variable Importance — Random Forest")
+```
+
+An interesting thing I noticed is that Deaths ranked as the most important predictor by MeanDecreaseAccuracy, which makes sense since dying frequently puts your team at a disadvantage regardless of what mode you are playing. Score actually ranked last by that same metric, even though it ranked highest in MeanDecreaseGini. The two metrics disagreeing on Score is worth noting. My hypothesis is that Score helps the trees split the data cleanly, but removing it entirely does not hurt overall accuracy as much as removing Deaths would. GameType ranked last by MeanDecreaseGini, which would suggest that win or loss comes down more to individual performance than to which game mode was being played.
