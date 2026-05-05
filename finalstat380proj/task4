@@ -1,0 +1,139 @@
+## Task4
+Research Question: 
+"Which classification method best predicts match outcome (Win/Loss) using Score, Eliminations, Deaths, and GameType as predictors?"
+
+We decided to choose logistic regression out of all learned classification method.
+
+### Logistic Regression:
+
+Chunk1: This chunk filters the dataset to include only complete matches and removes missing values in key variables. It then extracts the player’s score and opponent’s score from the Result column. The outcome variable is created by comparing these scores: if the player’s score is higher, the outcome is a win; otherwise, it is a loss.
+
+```{r}
+library(dplyr)
+library(stringr)
+library(pROC)
+
+cod_t4 <- cod %>%
+  filter(
+    FullPartial == "Full",
+    Result != "",
+    !is.na(Score),
+    !is.na(Eliminations),
+    !is.na(Deaths)
+  ) %>%
+  mutate(
+    team_score = as.numeric(str_extract(Result, "^[0-9]+")),
+    opp_score  = as.numeric(str_extract(Result, "[0-9]+$")),
+    Outcome = case_when(
+      team_score > opp_score ~ "Win",
+      team_score < opp_score ~ "Loss",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  filter(!is.na(Outcome)) %>%
+  mutate(
+    Outcome  = factor(Outcome, levels = c("Loss", "Win")),
+    GameType = factor(GameType)
+  ) %>%
+  select(Outcome, Score, Eliminations, Deaths, GameType)
+
+table(cod_t4$Outcome)
+```
+Chunk 2: Create training and validation sets
+
+This chunk splits the data into a training set (80%) and a validation set (20%). The training set is used to fit the model, while the validation set is used to evaluate predictive performance on unseen data.
+```{r}
+set.seed(123)
+
+train_ind <- sample(
+  1:nrow(cod_t4),
+  floor(0.8 * nrow(cod_t4))
+)
+
+Train <- cod_t4[train_ind, ]
+Validation <- cod_t4[-train_ind, ]
+```
+
+Chunk 3: Fit the logistic regression model
+
+This chunk fits a logistic regression model using the training data. The model estimates the probability of winning based on Score, Eliminations, Deaths, and GameType， the variables we choose as important according to game experience.
+
+```{r}
+log_mod <- glm(
+  Outcome ~ Score + Eliminations + Deaths + GameType,
+  data = Train,
+  family = binomial
+)
+
+summary(log_mod)
+```
+From the model summary:
+
+Eliminations: Higher eliminations are associated with a higher probability of winning.
+Deaths: More deaths significantly decrease the probability of winning.
+Score: does not appear to add much predictive value once eliminations and deaths are included.
+GameType: does not have a meaningful effect on match outcome in this model.
+Even though Score seems intuitively important, it is not statistically significant in the model. This is likely because:
+
+We can see that Score is highly correlated with eliminations and deaths and the model already captures performance through those variables
+
+Chunk 4: Predict win probabilities
+
+This chunk uses the fitted logistic regression model to predict the probability of a win for each observation in the validation set. The type = "response" option returns predicted probabilities instead of log-odds.
+```{r}
+log_prob <- predict(
+  log_mod,
+  newdata = Validation,
+  type = "response"
+)
+```
+
+Chunk 5: Convert probabilities into predicted classes
+
+This chunk converts predicted probabilities into predicted match outcomes. I used a cutoff of 0.5: if the predicted probability of winning is at least 0.5, the prediction is "Win"; otherwise, it is "Loss".
+
+```{r}
+log_pred <- ifelse(log_prob >= 0.5, "Win", "Loss")
+
+log_pred <- factor(
+  log_pred,
+  levels = levels(Validation$Outcome)
+)
+```
+
+Chunk 6: Confusion matrix and accuracy
+
+This chunk evaluates the model using a confusion matrix and accuracy. The confusion matrix shows how many wins and losses were classified correctly or incorrectly. Accuracy gives the proportion of validation observations that were predicted correctly.
+
+```{r}
+log_conf <- table(
+  Predicted = log_pred,
+  Actual = Validation$Outcome
+)
+
+log_accuracy <- mean(log_pred == Validation$Outcome)
+
+log_conf
+log_accuracy
+```
+The logistic regression model shows moderate predictive performance. The validation accuracy is approximately 0.669, meaning that about 66.9% of match outcomes are correctly classified. This indicates that the model performs better than random guessing(50%), but there is still room for improvement.
+
+Chunk 7: ROC curve and AUC
+
+This chunk calculates the ROC curve and AUC. AUC measures how well the model separates wins from losses across possible probability cutoffs. A larger AUC means the model is better at distinguishing wins from losses.
+```{r}
+log_roc <- roc(
+  Validation$Outcome,
+  log_prob,
+  levels = c("Loss", "Win")
+)
+
+log_auc <- auc(log_roc)
+
+log_auc
+
+plot(log_roc)
+```
+The AUC value is 0.7104, which suggests that the model has a reasonable ability to distinguish between wins and losses. In general, an AUC between 0.7 and 0.8 is considered acceptable, so this model demonstrates fair classification performance, though it is not highly accurate.
+
+In a conclusion, the logistic regression model provides a reasonable but not strong prediction of match outcomes. While the model performs better than chance and demonstrates acceptable discrimination (AUC ≈ 0.71), its accuracy suggests that additional predictors or more complex models may improve performance. Among the predictors, eliminations and deaths are the most important factors influencing match outcome, while score and game type do not contribute significantly after accounting for these variables.
