@@ -945,7 +945,7 @@ The logistic regression model shows moderate predictive performance. The validat
 
 This chunk calculates the ROC curve and AUC. AUC measures how well the model separates wins from losses across possible probability cutoffs. A larger AUC means the model is better at distinguishing wins from losses.
 
-```{r fig.align=’center’, fig.width=6, fig.height=5}
+```{r fig.align="center", fig.width=6, fig.height=5}
 log_roc <- roc(
   Validation$Outcome,
   log_prob,
